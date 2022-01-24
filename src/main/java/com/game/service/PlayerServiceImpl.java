@@ -5,7 +5,6 @@ import com.game.entity.Player;
 import com.game.entity.Profession;
 import com.game.entity.Race;
 import com.game.exceptions.BadRequestException;
-import com.game.exceptions.NotFoundException;
 import com.game.repository.PlayerRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -79,43 +78,31 @@ public class PlayerServiceImpl implements PlayerService {
 
     @Override
     public Player createNewPlayer(Player player) {
-        if (
-            // Без значений
-                player.getName() == null
-                        || player.getTitle() == null
-                        || player.getRace() == null
-                        || player.getProfession() == null
-                        || player.getBirthday() == null
-                        || player.getExperience() == null
-
-                        // Условия
-                        || player.getTitle().length() > 30
-                        || player.getName().length() > 12
-                        || player.getName().equals("")
-                        || player.getExperience() < 0
-                        || player.getExperience() > 10000000
-                        || player.getBirthday().getTime() < 0
-                        || player.getBirthday().before(new Date(946684800000L))
-                        || player.getBirthday().after(new Date(32503680000000L))
-        )
+        if (!validNewPlayer(player)){
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
-
+        }
         player.setLevel((int) (Math.sqrt((double) 2500 + 200 * player.getExperience()) - 50) / 100);
         player.setUntilNextLevel(50 * (player.getLevel() + 1) * (player.getLevel() + 2) - player.getExperience());
-
         return repository.save(player);
+    }
+
+    private Boolean validNewPlayer(Player player) {
+        return player.getName() != null
+                && player.getTitle() != null
+                && player.getRace() != null
+                && player.getProfession() != null
+                && player.getBirthday() != null
+                && player.getExperience() != null
+
+                && isValidTitle(player.getTitle())
+                && isValidName(player.getName())
+                && isValidExperience(player.getExperience())
+                && isValidDate(toCalendar(player.getBirthday()));
     }
 
     @Override
     public Player getPlayer(String id) {
-        Long newId;
-        try {
-            newId = Long.parseLong(id);
-        } catch (NumberFormatException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
-        }
-        if (!validId(newId))
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
+        long newId = getValidId(id);
         if (repository.existsById(newId)) {
             return repository.findById(newId).get();
         } else {
@@ -123,96 +110,107 @@ public class PlayerServiceImpl implements PlayerService {
         }
     }
 
-    public Boolean validId(Long id) {
-        return id > 0;
-    }
-
     @Override
     public Player updatePlayer(String id, Map<String, String> request) {
         long parseId = getValidId(id);
         Player player = getPlayer(id);
-        //создание request для метода creationWithValidation
-        //begin
+
+        if (request.get("name") == null) {
+            request.put("name", player.getName());
+        }
         String name = request.get("name");
-        if (name == null) {request.put("name", player.getName());}
 
+        if (request.get("title") == null) {
+            request.put("title",player.getTitle());
+        }
         String title = request.get("title");
-        if (title == null) {request.put("title",player.getTitle());}
 
+        if (request.get("race") == null) {
+            request.put("race",player.getRace().toString());
+        }
         String race = request.get("race");
-        if (race == null) {request.put("race",player.getRace().toString());}
 
+        if (request.get("profession") == null ) {
+            request.put("profession",player.getProfession().toString());
+        }
         String profession = request.get("profession");
-        if (profession == null ) {request.put("profession",player.getProfession().toString());}
 
+
+        if (request.get("birthday") == null) {
+            request.put("birthday", ((Long)player.getBirthday().getTime()).toString());
+        }
         String birthday = request.get("birthday");
-        if (birthday == null) {
-            request.put("birthday", ( (Long) player.getBirthday().getTime()).toString());
-        }
 
+        if (request.get("banned") == null) {
+            request.put("banned",(player.isBanned()).toString());
+        }
         String banned = request.get("banned");
-        if (banned == null) {request.put("banned",((Boolean) player.isBanned()).toString());}
 
-        String experience = request.get("experience");
-        if (experience == null) {
-            request.put("experience",((Integer) player.getExperience()).toString());
+        if (request.get("experience") == null) {
+            request.put("experience",(player.getExperience()).toString());
         }
-        //end
-        player = creationWithValidation(request);
+        String experience = request.get("experience");
+
+
+        // проверка на нули
+        if (name == null && title == null && race == null && profession == null && birthday == null && experience == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
+        }
+
+        // name
+        if (isValidName(name)) {
+            player.setName(name);
+        } else throw new BadRequestException();
+
+        // title
+        if (isValidTitle(title)) {
+            player.setTitle(title);
+        } else throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
+
+        // exp and level
+        int exp = Integer.parseInt(experience);
+        if (isValidExperience(exp)) {
+            player.setExperience(exp);
+            int lvl = getLvl(exp);
+            player.setLevel(lvl);
+            int untilNextLvl = getUntilNextLvl(lvl,exp);
+            player.setUntilNextLevel(untilNextLvl);
+        } else throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
+
+        // birthday
+        long birthdayLong = Long.parseLong(birthday);
+        Calendar cal = Calendar.getInstance();
+        cal.setTimeInMillis(birthdayLong);
+        if (isValidDate(cal)) {
+            player.setBirthday(cal.getTime());
+        } else throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
+
+        // banned
+        if (banned != null) {
+            boolean isBanned = Boolean.parseBoolean(banned);
+            player.setBanned(isBanned);
+        } else throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
+
+        player.setRace(Race.valueOf(race));
+        player.setProfession(Profession.valueOf(profession));
         player.setId(parseId);
         repository.save(player);
         return player;
     }
 
-    private Player creationWithValidation(Map<String,String> request) {
-        String name = request.get("name");
-        String title = request.get("title");
-        String race = request.get("race");
-        String profession = request.get("profession");
-        String birthday = request.get("birthday");
-        String experience = request.get("experience");
-        String banned = request.get("banned");
-        // проверка на нули
-        if (name != null && title != null && race != null && profession != null && birthday != null && experience != null) {
-            Player player = new Player();
-            // проверка длины имени 12 (не пустая строка)
-            if (name.length()<=12 && !name.trim().equals("")) {
-                player.setName(name);
-            } else throw new BadRequestException(); //except
-            // проверка длины тайтла 30
-            if (title.length()<=30) {
-                player.setTitle(title);
-            } else throw new BadRequestException(); //except
-            // опыт 0..10_000_000
-            int exp = Integer.parseInt(experience);
-            if (exp>=0 && exp<=10_000_000) {
-                player.setExperience(exp);
-                int lvl =getLvl(exp);
-                player.setLevel(lvl);
-                int untilNextLvl = getUntilNextLvl(lvl,exp);
-                player.setUntilNextLevel(untilNextLvl);
-            } else throw new BadRequestException(); //except
-            // birthday > [Long] 0 and [2000..3000y]
-            long brthday = Long.parseLong(birthday);
-            Calendar cal = Calendar.getInstance();
-            cal.setTimeInMillis(brthday);
-            Calendar afterBorder = new GregorianCalendar(2000,0,0);
-            Calendar beforeBorder = new GregorianCalendar(3000,0,0);
-            if (brthday > 0 && cal.after(afterBorder) && cal.before(beforeBorder)) {
-                player.setBirthday(cal.getTime());
-            } else throw new BadRequestException(); //except
-            // banned
-            if (banned!=null) {
-                boolean isBanned = Boolean.parseBoolean(banned);
-                player.setBanned(isBanned);
-            }
-            Race playerRace = Race.valueOf(race);
-            player.setRace(playerRace);
-            Profession playerProfession = Profession.valueOf(profession);
-            player.setProfession(playerProfession);
-            return player;
-        } else throw new BadRequestException();
+    private long getValidId(String id) {
+        long parseId;
+        try {
+            parseId = Long.parseLong(id);
+        } catch (NumberFormatException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
+        }
+        if (!isValidId(parseId)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
+        }
+        return parseId;
     }
+
 
     private int getLvl(int exp) {
         return (int) (Math.sqrt(2500+200*exp)-50)/100;
@@ -222,37 +220,38 @@ public class PlayerServiceImpl implements PlayerService {
         return 50*(lvl+1)*(lvl+2)-exp;
     }
 
+    private boolean isValidId(Long id) {
+        return id > 0;
+    }
+
+    private boolean isValidName(String name) {
+        return name.length() <= 12 && !name.trim().equals("");
+    }
+
+    private boolean isValidTitle(String title) {
+        return title.length() <= 30;
+    }
+
     private boolean isValidExperience(Integer experience) {
         return experience >= 0 && experience <= 10000000;
     }
 
-    private boolean isValidDate(Date date) {
-        if (date == null) {
-            return false;
-        }
-        Calendar calendar = Calendar.getInstance();
-        calendar.set(1999, 11, 31);
-        Date after = calendar.getTime();
-        calendar.set(3000, 11, 31);
-        Date before = calendar.getTime();
-
-        return  (date.before(before) && date.after(after));
+    private boolean isValidDate(Calendar date) {
+        Calendar afterBorder = new GregorianCalendar(2000,0,0);
+        Calendar beforeBorder = new GregorianCalendar(3000,0,0);
+        return (date.getTime().getTime() > 0) && date.before(beforeBorder) && date.after(afterBorder);
     }
+
+    private Calendar toCalendar(Date date){
+        Calendar cal = Calendar.getInstance();
+        cal.setTime(date);
+        return cal;
+    }
+
 
     @Override
     public void delete(String id) {
         repository.delete(getPlayer(id));
-    }
-
-    private long getValidId(String id) {
-        long parseId;
-        try {
-            parseId = Long.parseLong(id);
-        } catch (Exception e) {
-            throw new BadRequestException();
-        }
-        if (parseId<=0) throw new BadRequestException();
-        return parseId;
     }
 
 }

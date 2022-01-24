@@ -35,11 +35,11 @@ public class PlayerController {
                                              @RequestParam(value = "maxLevel", required = false) Integer maxLevel,
                                              @RequestParam(defaultValue = "0", value = "pageNumber") Integer pageNumber,
                                              @RequestParam(defaultValue = "3", value = "pageSize") Integer pageSize,
-                                             @RequestParam(defaultValue = "ID", value = "order") PlayerOrder order) {
+                                             @RequestParam(defaultValue = "ID", value = "playerOrder") PlayerOrder playerOrder) {
         List<Player> players = service.getFilteredPlayers(name,title,race,profession,
                 afterDate,beforeDate,banned,minExperience, maxExperience,
                 minLevel,maxLevel);
-        return service.getSortedPlayers(players,pageNumber,pageSize,order);
+        return service.getSortedPlayers(players,pageNumber,pageSize, playerOrder);
     }
 
 
